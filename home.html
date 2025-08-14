@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MedTranslate - Healthcare Translator</title>
+<style>
+:root {
+  --primary-color: #0D3B66;
+  --accent-color: #00A6FB;
+  --text-color: #fff;
+  --radius: 12px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+html, body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden; /* prevents scroll */
+}
+body {
+  font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+  min-height: 100vh;
+  background: url('https://images.unsplash.com/photo-1588776814546-3e8cb93c33c3?auto=format&fit=crop&w=1600&q=80') no-repeat center center/cover;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  position: relative;
+  color: var(--text-color);
+}
+
+.overlay {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: rgba(0,0,0,0.5); /* dark overlay for readability */
+  z-index: 1;
+}
+
+.content {
+  position: relative;
+  z-index: 2;
+  max-width: 500px;
+  padding: 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  align-items: center;
+}
+
+.content h1 {
+  font-size: 2.2rem;
+  font-weight: 800;
+  color: var(--text-color);
+}
+
+.content p {
+  font-size: 1.1rem;
+  font-weight: 600;
+  font-style: italic;
+  line-height: 1.4;
+  color: var(--text-color);
+}
+
+.start-btn {
+  padding: 16px 36px;
+  font-size: 1.1rem;
+  color: #fff;
+  background: linear-gradient(135deg, #00A6FB, #0D3B66);
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+}
+
+.start-btn:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 30px rgba(0,0,0,0.35);
+}
+
+.start-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+}
+
+@media(max-width:480px){
+  .content h1 { font-size: 1.8rem; }
+  .content p { font-size: 1rem; }
+  .start-btn { padding: 14px 28px; font-size: 1rem; }
+}
+</style>
+</head>
+<body>
+
+<div class="overlay"></div>
+
+<div class="content">
+  <h1>MedTranslate</h1>
+  <p>Translate healthcare conversations instantly and securely</p>
+  <button class="start-btn" onclick="window.location.href='/static/index.html'">Start Translating</button>
+</div>
+
+</body>
+</html>

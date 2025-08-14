@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Healthcare Translation App</title>
+<style>
+:root {
+  --pad: 14px;
+  --primary-color: #0D3B66;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: system-ui, Arial, sans-serif;
+  background: #f7f7fb;
+  color: #111;
+  padding: var(--pad);
+}
+
+.app {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: var(--pad);
+}
+
+h1 {
+  font-size: 1.6rem;
+  color: var(--primary-color);
+  margin-bottom: 1.5rem;
+  font-weight: 900;   /* Bold */
+  font-style: italic;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.row > div:first-child {
+  flex: 2;   /* first div ("I speak") gets more space */
+}
+
+.row > div:last-child {
+  flex: 0 0 auto;  /* second div ("I want to translate to") hugs left */
+}
+
+@media (max-width: 500px) {
+  .row > div {
+    width: 100%;
+  }
+}
+
+select,
+button,
+input {
+  font-size: 1rem;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  width: 100%;
+}
+
+@media (min-width: 500px) {
+  select,
+  button,
+  input {
+    width: auto;
+  }
+}
+
+button {
+  background: var(--primary-color);
+  color: #fff;
+  cursor: pointer;
+  transition: opacity 0.3s;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.card {
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+  padding: var(--pad);
+  margin-top: var(--pad);
+  width: 100%;
+}
+
+.label {
+  font-size: 1.0rem;
+  color: black;
+  margin-bottom: 6px;
+  display: block;
+}
+
+textarea {
+  width: 100%;
+  min-height: 96px;
+  border: 1px solid #eee;
+  border-radius: 12px;
+  padding: 10px;
+  font-size: 0.95rem;
+  background: #fafafa;
+  display: block;
+  resize: vertical;
+}
+
+.muted {
+  color: #777;
+  font-size: 0.9rem;
+}
+.button-row {
+  display: flex;
+  flex-wrap: wrap;  /* allow buttons to move to next line if needed */
+  gap: 10px;
+  width: 100%;
+}
+
+.button-row button {
+  flex: 1 1 auto; /* buttons can shrink and grow */
+  min-width: 120px; /* ensures buttons are still clickable */
+}
+
+
+</style>
+</head>
+<body>
+<div class="app">
+ <h1><center>Translate</center></h1>
+
+ <div class="row">
+   <div>
+     <label class="label">I speak</label>
+     <select id="sourceLang"></select>
+   </div>cd "C:\Users\Hp\Desktop\MyProject"
+
+   <div>
+     <label class="label">I want to translate to</label>
+     <select id="targetLang"></select>
+   </div>
+ </div>
+
+<div class="button-row" style="margin-top:10px;">
+  <button id="recordBtn" class="left-btn">🎤 Start Speaking</button>
+  <button id="stopBtn" class="center-btn" disabled>⏹️ Stop</button>
+  <button id="speakBtn" class="right-btn" disabled>🔊 Speak Translation</button>
+</div>
+
+
+
+ <div class="card">
+   <div class="label">Original Transcript (live)</div>
+   <textarea id="originalText" readonly></textarea>
+ </div>
+
+ <div class="card">
+   <div class="label">Enhanced (medical-aware)</div>
+   <textarea id="enhancedText" readonly></textarea>
+ </div>
+
+ <div class="card">
+   <div class="label">Translated</div>
+   <textarea id="translatedText" readonly></textarea>
+   <div class="muted" id="status"></div>
+ </div>
+
+ <p class="muted">
+   Privacy note: Your text is translated securely and handled with full confidentiality.
+ </p>
+</div>
+
+<script>
+const targetSelect   = document.getElementById("targetLang");
+const sourceSelect   = document.getElementById("sourceLang");
+const originalText   = document.getElementById("originalText");
+const enhancedText   = document.getElementById("enhancedText");
+const translatedText = document.getElementById("translatedText");
+const recordBtn      = document.getElementById("recordBtn");
+const stopBtn        = document.getElementById("stopBtn");
+const speakBtn       = document.getElementById("speakBtn");
+const statusEl       = document.getElementById("status");
+
+// Populate languages from backend
+fetch("/languages").then(r => r.json()).then(({ languages }) => {
+  languages.forEach(lang => {
+    const opt1 = document.createElement("option");
+    opt1.value = lang.code;
+    opt1.textContent = `${lang.name} (${lang.code})`;
+    opt1.dataset.bcp47 = lang.bcp47 || lang.code;
+    sourceSelect.appendChild(opt1);
+
+    const opt2 = opt1.cloneNode(true);
+    targetSelect.appendChild(opt2);
+  });
+  sourceSelect.value = "en";
+  targetSelect.value = "es";
+});
+
+// Web Speech API
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recognition = SR ? new SR() : null;
+if (recognition) {
+  recognition.lang = "en-US";
+  recognition.continuous = true;
+  recognition.interimResults = true;
+} else alert("SpeechRecognition not supported.");
+
+let listening = false;
+let finalBuffer = "";
+
+// Start recording
+recordBtn.onclick = () => {
+  if (!recognition || listening) return;
+  originalText.value = "";
+  finalBuffer = "";
+  recognition.lang = sourceSelect.selectedOptions[0]?.dataset?.bcp47 || "en-US";
+  recognition.start();
+  listening = true;
+  recordBtn.disabled = true;
+  stopBtn.disabled = false;
+  statusEl.textContent = "Listening…";
+};
+
+// Stop recording
+stopBtn.onclick = () => {
+  if (!recognition || !listening) return;
+  recognition.stop();
+  statusEl.textContent = "Processing…";
+};
+
+// Recognition events
+if (recognition) {
+  recognition.onresult = (e) => {
+    let interim = "";
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const res = e.results[i];
+      if (res.isFinal) finalBuffer += res[0].transcript + " ";
+      else interim += res[0].transcript;
+    }
+    originalText.value = (finalBuffer + " " + interim).trim();
+  };
+
+  recognition.onend = async () => {
+    listening = false;
+    stopBtn.disabled = true;
+
+    const textToProcess = (originalText.value || "").trim();
+    if (!textToProcess) {
+      statusEl.textContent = "No speech captured.";
+      recordBtn.disabled = false;
+      return;
+    }
+    await translateViaBackend(textToProcess);
+  };
+
+  recognition.onerror = (e) => {
+    listening = false;
+    recordBtn.disabled = false;
+    stopBtn.disabled = true;
+    statusEl.textContent = "Speech error: " + (e.error || "unknown");
+  };
+}
+
+// Translation function
+async function translateViaBackend(text) {
+  try {
+    statusEl.textContent = "Enhancing & translating…";
+    recordBtn.disabled = true;
+    speakBtn.disabled = true;
+
+    const res = await fetch("/process_text", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text,
+        source_lang: sourceSelect.value,
+        target_lang: targetSelect.value
+      })
+    });
+
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || "Server error");
+
+    enhancedText.value   = data.enhanced_text || "";
+    translatedText.value = data.translated_text || "";
+    speakBtn.dataset.lang = data.tts_lang || targetSelect.selectedOptions[0]?.dataset?.bcp47 || targetSelect.value;
+    speakBtn.disabled = translatedText.value.trim().length === 0;
+    statusEl.textContent = "Done.";
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = "Error: " + err.message;
+  } finally {
+    // Enable record button after translation
+    recordBtn.disabled = false;
+  }
+}
+
+// Speak translation
+speakBtn.onclick = () => {
+  const txt = translatedText.value.trim();
+  if (!txt) return;
+  const msg = new SpeechSynthesisUtterance(txt);
+  msg.lang = speakBtn.dataset.lang || "en-US";
+
+  const voices = window.speechSynthesis.getVoices();
+  const match = voices.find(v => v.lang.toLowerCase().startsWith(msg.lang.slice(0,2)));
+  if (match) msg.voice = match;
+
+  window.speechSynthesis.cancel();
+  window.speechSynthesis.speak(msg);
+};
+</script>
+</body>
+</html>
