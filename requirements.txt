@@ -1,15 +1,12 @@
 Flask==2.3.3
 Flask-Cors
 gunicorn==21.2.0
-torch==2.2.0
+torch==2.2.0+cpu
+# CPU-only PyTorch, smaller size
+--extra-index-url https://download.pytorch.org/whl/cpu
 transformers==4.34.0
 sentencepiece==0.1.99
- # required by many MarianMT / T5 models
 protobuf>=4.23.0
-# needed by transformers
 tokenizers
-# Hugging Face tokenizers
 numpy==1.25.2
-# PyTorch uses numpy
 tqdm==4.65.0
-# progress bars when downloading models
