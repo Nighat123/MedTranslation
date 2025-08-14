@@ -1,5 +1,5 @@
 Flask==2.3.3
-Flask-Cors==3.0.11
+Flask-Cors
 gumicorn==21.2.0
 torch==2.2.0
 transformers==4.34.0
