@@ -160,7 +160,7 @@ def process_text():
     except RuntimeError as re:
         return jsonify({"error": str(re)}), 400
     except Exception as e:
-        logger.exception("Processing failed")
+        logger.exception("Translation failed.Please try again")
         return jsonify({"error": str(e)}), 500
 
 

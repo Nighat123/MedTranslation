@@ -18,12 +18,29 @@
   padding: 0;
 }
 
+
 body {
   font-family: system-ui, Arial, sans-serif;
-  background: #f7f7fb;
   color: #111;
   padding: var(--pad);
+
+  /* Light grey background */
+  background-color: #F4F4F9;
+
+  /* Subtle pattern: diagonal lines */
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgba(0,0,0,0.05),
+    rgba(0,0,0,0.05) 1.5px,
+    transparent 1px,
+    transparent 20px
+  );
+
+  background-repeat: repeat;
 }
+
+
+
 
 .app {
   max-width: 720px;
@@ -144,7 +161,7 @@ textarea {
    <div>
      <label class="label">I speak</label>
      <select id="sourceLang"></select>
-   </div>cd "C:\Users\Hp\Desktop\MyProject"
+   </div>
 
    <div>
      <label class="label">I want to translate to</label>
