@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 # Load environment variables from a local .env file (if present)
@@ -22,18 +24,47 @@ from openai import OpenAI, OpenAIError
 
 # --- Configuration ---
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL")  # optional, e.g., custom proxy
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL")  # optional, e.g., a proxy or Azure-compatible endpoint
 DEFAULT_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
-if not OPENAI_API_KEY:
-    raise RuntimeError(
-        "OPENAI_API_KEY is not set. Create a .env with OPENAI_API_KEY=sk-... or set it in your environment."
+# Lazily create the OpenAI client when needed so app can start without a key
+_client: Optional[OpenAI] = None
+
+
+def get_openai_client() -> OpenAI:
+    global _client
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="OPENAI_API_KEY is not set. Add it to .env or the environment.",
+        )
+    if _client is None:
+        _client = OpenAI(api_key=api_key, base_url=OPENAI_BASE_URL) if OPENAI_BASE_URL else OpenAI(api_key=api_key)
+    return _client
+
+
+app = FastAPI(title="Medical App", version="1.0.1")
+
+# --- Static files ---
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
+
+
+@app.get("/")
+def root():
+    index_path = STATIC_DIR / "index.html"
+    if index_path.exists():
+        return FileResponse(str(index_path))
+    return JSONResponse(
+        {
+            "message": "Welcome to the Medical App",
+            "docs": "/docs",
+            "health": "/health",
+            "static_index_hint": "Place an index.html at ./static/index.html to serve a homepage.",
+        }
     )
-
-# Create a single shared client
-client = OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL) if OPENAI_BASE_URL else OpenAI(api_key=OPENAI_API_KEY)
-
-app = FastAPI(title="Medical App", version="1.0.0")
 
 
 # --- Schemas ---
@@ -58,7 +89,8 @@ class VisionResponse(BaseModel):
 # --- Routes ---
 @app.get("/health")
 def health():
-    return {"status": "ok", "model": DEFAULT_MODEL}
+    # Don’t force a key just to report health
+    return {"status": "ok", "model": DEFAULT_MODEL, "has_api_key": bool(os.getenv("OPENAI_API_KEY"))}
 
 
 @app.post("/chat", response_model=ChatReply)
@@ -70,6 +102,7 @@ async def chat(req: ChatRequest):
     messages.append({"role": "user", "content": req.message})
 
     try:
+        client = get_openai_client()
         resp = client.chat.completions.create(
             model=model,
             messages=messages,
@@ -78,6 +111,8 @@ async def chat(req: ChatRequest):
         )
         content = resp.choices[0].message.content
         return ChatReply(reply=content, model=model)
+    except HTTPException:
+        raise
     except OpenAIError as e:
         raise HTTPException(status_code=502, detail=f"OpenAI error: {e}")
     except Exception as e:
@@ -99,6 +134,7 @@ async def vision(
     """Send an image and an optional prompt for multimodal analysis."""
     model = model or DEFAULT_MODEL
     try:
+        client = get_openai_client()
         data = await file.read()
         mime = file.content_type or _detect_mime(file.filename or "")
         b64 = base64.b64encode(data).decode("utf-8")
@@ -120,6 +156,8 @@ async def vision(
         )
         content = resp.choices[0].message.content
         return VisionResponse(reply=content, model=model)
+    except HTTPException:
+        raise
     except OpenAIError as e:
         raise HTTPException(status_code=502, detail=f"OpenAI error: {e}")
     except Exception as e:
@@ -134,7 +172,7 @@ async def vision(
 if __name__ == "__main__":
     import uvicorn
 
-    host = os.getenv("HOST", "0.0.0.0")
+    host = os.getenv("HOST", "127.0.0.1")  # 127.0.0.1 is fine for local browsing
     port = int(os.getenv("PORT", "8000"))
     reload = os.getenv("RELOAD", "1").lower() in ("1", "true", "yes")
 
