@@ -1,18 +1,171 @@
 <!doctype html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Medical App</title>
+    <title>Healthcare Translation Web App</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <style>body{font-family:system-ui,Arial;margin:2rem} code{background:#f4f4f4;padding:.2rem .4rem;border-radius:4px}</style>
+    <meta
+      name="description"
+      content="Real-time multilingual translation between patients and healthcare providers with transcription and audio playback."
+    />
+
+    <!-- Minimal inline fallback so it never renders unstyled even if external CSS fails -->
+    <style>
+      :root { color-scheme: dark; }
+      body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Helvetica Neue", sans-serif; background: #0f172a; color: #e6eefc; }
+      .topbar { display:flex; justify-content:space-between; align-items:center; padding:.9rem 1rem; border-bottom:1px solid rgba(255,255,255,.12); position:sticky; top:0; }
+      .container { padding: 1rem; max-width: 1100px; margin: 0 auto; }
+      .card { border:1px solid rgba(255,255,255,.12); border-radius: 12px; padding: 1rem; margin-bottom: 1rem; background: rgba(255,255,255,.04); }
+      button { padding:.6rem .9rem; border-radius:10px; border:1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.05); color:inherit; cursor:pointer; }
+      .columns { display:grid; gap:1rem; grid-template-columns: 1fr; }
+      @media (min-width: 860px) { .columns { grid-template-columns: 1fr 1fr; } }
+      .transcript { min-height:160px; border:1px solid rgba(255,255,255,.12); border-radius:10px; padding:.8rem; white-space:pre-wrap; }
+    </style>
+
+    <!-- Use ABSOLUTE paths so they work from /static/index.html -->
+    <link rel="stylesheet" href="/static/styles.css?v=6" />
   </head>
   <body>
-    <h1>Medical App</h1>
-    <p>FastAPI is running. Try:</p>
-    <ul>
-      <li><a href="/health">/health</a></li>
-      <li><a href="/docs">/docs</a> (OpenAPI UI)</li>
-    </ul>
-    <p>Static is served at <code>/static</code>. You’re viewing <code>/static/index.html</code>.</p>
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <defs>
+              <linearGradient id="g" x1="0" x2="1">
+                <stop offset="0%" stop-color="#22c55e" />
+                <stop offset="100%" stop-color="#3b82f6" />
+              </linearGradient>
+            </defs>
+            <path fill="url(#g)" d="M12 3a5 5 0 0 0-5 5v4a5 5 0 1 0 10 0V8a5 5 0 0 0-5-5Zm-1 5a1 1 0 1 1 2 0v4a1 1 0 1 1-2 0V8Zm-5 4a6 6 0 0 0 5 5.917V21h6v-3.083A6 6 0 0 0 18 12h-2a4 4 0 1 1-8 0H6Z"/>
+          </svg>
+        </div>
+        <div class="titles">
+          <h1>Healthcare Translation</h1>
+          <p class="subtitle">Real-time transcription, translation, and speech</p>
+        </div>
+      </div>
+      <nav class="links">
+        <a class="link" href="/docs" target="_blank" rel="noopener">API Docs</a>
+        <a class="link" href="/health" target="_blank" rel="noopener">Health</a>
+      </nav>
+    </header>
+
+    <main class="container">
+      <section class="hero card">
+        <div class="hero-text">
+          <h2>Bridge language barriers in clinical conversations</h2>
+          <p>Speak naturally. See your words appear instantly and hear accurate translations optimized for medical terminology.</p>
+        </div>
+        <div class="hero-cta">
+          <button id="micBtn" class="primary jumbo" aria-pressed="false">
+            <span class="btn-icon" aria-hidden="true">🎙️</span>
+            <span class="btn-text">Start Mic</span>
+          </button>
+          <button id="recordBtn" class="secondary jumbo" title="Fallback if live recognition is not supported">
+            <span class="btn-icon" aria-hidden="true">⏺️</span>
+            <span class="btn-text">Record (Fallback)</span>
+          </button>
+        </div>
+      </section>
+
+      <section class="card controls">
+        <div class="row">
+          <div class="field">
+            <label for="inputLang">Input language</label>
+            <select id="inputLang"></select>
+          </div>
+          <div class="field">
+            <label for="outputLang">Output language</label>
+            <select id="outputLang"></select>
+          </div>
+          <div class="field grow">
+            <label for="voiceSelect">Server TTS voice</label>
+            <select id="voiceSelect">
+              <option value="alloy" selected>Alloy</option>
+              <option value="amber">Amber</option>
+              <option value="aria">Aria</option>
+              <option value="verse">Verse</option>
+              <option value="vibrant">Vibrant</option>
+              <option value="valley">Valley</option>
+              <option value="coral">Coral</option>
+              <option value="ballad">Ballad</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="formatSelect">Format</label>
+            <select id="formatSelect">
+              <option value="mp3" selected>MP3</option>
+              <option value="wav">WAV</option>
+              <option value="ogg">OGG</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="row between">
+          <label class="checkbox">
+            <input type="checkbox" id="useBrowserTTS" />
+            <span>Use browser TTS (fallback). Otherwise, server TTS.</span>
+          </label>
+
+          <div class="actions">
+            <button id="speakBtn" class="primary">
+              <span class="btn-icon" aria-hidden="true">🔊</span>
+              <span class="btn-text">Speak</span>
+            </button>
+            <button id="clearBtn" class="ghost">
+              <span class="btn-icon" aria-hidden="true">🧹</span>
+              <span class="btn-text">Clear</span>
+            </button>
+          </div>
+        </div>
+
+        <div id="status" class="status" role="status" aria-live="polite"></div>
+        <audio id="audioPlayer" controls class="audio" hidden></audio>
+      </section>
+
+      <section class="columns">
+        <div class="card column">
+          <div class="colhead">
+            <div class="title-with-badge">
+              <span class="badge">Original</span>
+              <h3>Transcript</h3>
+            </div>
+            <div class="colactions">
+              <button id="copyOriginal" class="ghost small" title="Copy original transcript">Copy</button>
+            </div>
+          </div>
+          <div id="original" class="transcript" aria-live="polite"></div>
+        </div>
+
+        <div class="card column">
+          <div class="colhead">
+            <div class="title-with-badge">
+              <span class="badge accent">Translated</span>
+              <h3>Transcript</h3>
+            </div>
+            <div class="colactions">
+              <button id="copyTranslated" class="ghost small" title="Copy translated transcript">Copy</button>
+            </div>
+          </div>
+          <div id="translated" class="transcript" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <section class="card tips">
+        <h4>Tips</h4>
+        <ul>
+          <li>Use short phrases and pause briefly for best recognition.</li>
+          <li>Select locale-specific languages for improved accuracy (e.g., Spanish (Mexico)).</li>
+          <li>Do not input personal health information in demos. This prototype is not a medical device.</li>
+        </ul>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <div>© 2025 Healthcare Translation Prototype</div>
+    </footer>
+
+    <!-- Absolute path for script, too -->
+    <script src="/static/app.js?v=6" defer></script>
   </body>
 </html>

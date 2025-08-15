@@ -1,236 +1,348 @@
-(function () {
-  const $ = (id) => document.getElementById(id);
+// Basic language list (BCP-47 tags). Extend as needed.
+const LANGUAGES = [
+  { code: "auto", name: "Auto-detect (input)" },
+  { code: "en-US", name: "English (United States)" },
+  { code: "es-ES", name: "Spanish (Spain)" },
+  { code: "es-MX", name: "Spanish (Mexico)" },
+  { code: "fr-FR", name: "French" },
+  { code: "de-DE", name: "German" },
+  { code: "it-IT", name: "Italian" },
+  { code: "pt-PT", name: "Portuguese" },
+  { code: "pt-BR", name: "Portuguese (Brazil)" },
+  { code: "ar-SA", name: "Arabic" },
+  { code: "hi-IN", name: "Hindi" },
+  { code: "ur-PK", name: "Urdu" },
+  { code: "zh-CN", name: "Chinese (Simplified)" },
+  { code: "ja-JP", name: "Japanese" },
+  { code: "ko-KR", name: "Korean" },
+];
 
-  const sourceLangEl = $("sourceLang");
-  const targetLangEl = $("targetLang");
-  const useBrowserASREl = $("useBrowserASR");
-  const resetBtn = $("resetBtn");
-  const speakBtn = $("speakBtn");
-  const recordBtn = $("recordBtn");
-  const originalEl = $("original");
-  const translatedEl = $("translated");
-  const correctedBox = $("correctedBox");
-  const correctedEl = $("corrected");
-  const asrLabel = $("asrLabel");
+const inputLang = document.getElementById("inputLang");
+const outputLang = document.getElementById("outputLang");
+const micBtn = document.getElementById("micBtn");
+const recordBtn = document.getElementById("recordBtn");
+const clearBtn = document.getElementById("clearBtn");
+const originalEl = document.getElementById("original");
+const translatedEl = document.getElementById("translated");
+const statusEl = document.getElementById("status");
+const speakBtn = document.getElementById("speakBtn");
+const audioPlayer = document.getElementById("audioPlayer");
+const voiceSelect = document.getElementById("voiceSelect");
+const formatSelect = document.getElementById("formatSelect");
+const useBrowserTTSCb = document.getElementById("useBrowserTTS");
+const copyOriginalBtn = document.getElementById("copyOriginal");
+const copyTranslatedBtn = document.getElementById("copyTranslated");
 
-  let original = "";
-  let corrected = "";
-  let translated = "";
-  let isRecognizing = false;
-  let useBrowserASR = false;
-  let canBrowserASR = false;
+// Populate language selectors
+function populateLanguages() {
+  inputLang.innerHTML = "";
+  outputLang.innerHTML = "";
+  LANGUAGES.forEach((l) => {
+    const optIn = document.createElement("option");
+    optIn.value = l.code;
+    optIn.textContent = l.name;
+    inputLang.appendChild(optIn);
 
-  // Speech recognition setup (if available)
-  const w = window;
-  const SR = w.SpeechRecognition || w.webkitSpeechRecognition;
-  canBrowserASR = !!SR;
-  useBrowserASR = canBrowserASR;
-  useBrowserASREl.checked = useBrowserASR;
-  asrLabel.textContent = "Use browser speech recognition" + (canBrowserASR ? "" : " (unavailable in this browser)");
-
-  // Debounce helper
-  function debounce(fn, delay) {
-    let t = null;
-    return (...args) => {
-      if (t) clearTimeout(t);
-      t = setTimeout(() => fn(...args), delay);
-    };
-  }
-
-  // State updates
-  function updateOriginal(text) {
-    original = text;
-    originalEl.textContent = text.trim() ? text : "Speak to begin…";
-  }
-
-  function updateTranslated(text) {
-    translated = text;
-    translatedEl.textContent = text.trim() ? text : "Translation will appear here…";
-    speakBtn.disabled = !translated.trim();
-  }
-
-  function updateCorrected(text) {
-    corrected = text;
-    if (corrected && corrected.trim() && corrected.trim() !== original.trim()) {
-      correctedBox.classList.remove("hidden");
-      correctedEl.textContent = corrected;
-    } else {
-      correctedBox.classList.add("hidden");
-      correctedEl.textContent = "";
+    if (l.code !== "auto") {
+      const optOut = document.createElement("option");
+      optOut.value = l.code;
+      optOut.textContent = l.name;
+      outputLang.appendChild(optOut);
     }
-  }
+  });
+  inputLang.value = "auto";
+  outputLang.value = "es-ES"; // default to Spanish
+}
+populateLanguages();
 
-  // API calls
-  async function translateNow(text, sourceLang, targetLang) {
-    if (!text.trim()) return;
-    try {
-      const res = await fetch("/api/translate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, sourceLang, targetLang })
-      });
-      if (!res.ok) throw new Error("Translation failed");
-      const data = await res.json();
-      updateCorrected(data.corrected_source || text);
-      updateTranslated(data.translation || "");
-    } catch (err) {
-      console.error(err);
+let isMicActive = false;
+let recognition = null;
+let mediaRecorder = null;
+let recordedChunks = [];
+let fullOriginalTranscript = "";
+let fullTranslatedTranscript = "";
+let lastTranslatedText = "";
+
+// Helper UI
+function setStatus(msg, type = "") {
+  statusEl.textContent = msg || "";
+  statusEl.className = "status" + (type ? ` ${type}` : "");
+}
+
+function appendOriginal(text) {
+  if (!text) return;
+  fullOriginalTranscript += (fullOriginalTranscript ? "\n" : "") + text;
+  originalEl.textContent = fullOriginalTranscript;
+  originalEl.scrollTop = originalEl.scrollHeight;
+}
+
+function appendTranslated(text) {
+  if (!text) return;
+  fullTranslatedTranscript += (fullTranslatedTranscript ? "\n" : "") + text;
+  translatedEl.textContent = fullTranslatedTranscript;
+  translatedEl.scrollTop = translatedEl.scrollHeight;
+  lastTranslatedText = text;
+}
+
+function clearTranscripts() {
+  fullOriginalTranscript = "";
+  fullTranslatedTranscript = "";
+  lastTranslatedText = "";
+  originalEl.textContent = "";
+  translatedEl.textContent = "";
+}
+
+// Translation via backend
+async function translateText(text) {
+  const source = inputLang.value === "auto" ? null : inputLang.value;
+  const target = outputLang.value || "en-US";
+  const body = {
+    text,
+    source_lang: source,
+    target_lang: target,
+  };
+  try {
+    const res = await fetch("/translate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${res.status}`);
     }
+    const data = await res.json();
+    return data.translated_text;
+  } catch (e) {
+    console.error("Translate error:", e);
+    setStatus(`Translate failed: ${e.message}`, "error");
+    return "";
+  }
+}
+
+// Start/stop real-time recognition using Web Speech API
+function getSpeechRecognition() {
+  const SR =
+    window.SpeechRecognition ||
+    window.webkitSpeechRecognition ||
+    window.mozSpeechRecognition ||
+    window.msSpeechRecognition;
+  return SR ? new SR() : null;
+}
+
+function startMic() {
+  if (isMicActive) return;
+  recognition = getSpeechRecognition();
+  if (!recognition) {
+    setStatus("Web Speech API not supported. Use 'Record (Fallback)'.", "warn");
+    return;
   }
 
-  const translateDebounced = debounce(translateNow, 400);
+  const lang = inputLang.value === "auto" ? "en-US" : inputLang.value;
+  recognition.lang = lang;
+  recognition.interimResults = true;
+  recognition.continuous = true;
 
-  // Browser Speech Recognition flow
-  let rec = null;
-  function startBrowserRecognition() {
-    if (!canBrowserASR) return;
-    rec = new SR();
-    rec.continuous = true;
-    rec.interimResults = true;
-    rec.lang = sourceLangEl.value;
+  recognition.onstart = () => {
+    isMicActive = true;
+    micBtn.textContent = "Stop Mic";
+    micBtn.classList.add("listening");
+    micBtn.setAttribute("aria-pressed", "true");
+    setStatus(`Listening (${lang})...`);
+  };
+  recognition.onerror = (e) => {
+    console.error("Recognition error:", e.error);
+    setStatus(`Mic error: ${e.error}`, "error");
+  };
+  recognition.onend = () => {
+    isMicActive = false;
+    micBtn.textContent = "Start Mic";
+    micBtn.classList.remove("listening");
+    micBtn.setAttribute("aria-pressed", "false");
+    setStatus("Mic stopped.");
+  };
+  let interim = "";
 
-    rec.onresult = (event) => {
-      let interim = "";
-      let finalText = "";
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const t = event.results[i][0].transcript;
-        if (event.results[i].isFinal) finalText += t;
-        else interim += t;
+  recognition.onresult = async (event) => {
+    let finalText = "";
+    interim = "";
+
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const res = event.results[i];
+      if (res.isFinal) {
+        finalText += res[0].transcript.trim() + " ";
+      } else {
+        interim += res[0].transcript;
       }
-      const combined = (original + finalText + interim).trim();
-      updateOriginal(combined);
-      translateDebounced(combined, sourceLangEl.value, targetLangEl.value);
-    };
-
-    rec.onerror = (e) => {
-      console.error("SR error", e.error);
-      isRecognizing = false;
-      recordBtn.classList.remove("recording");
-    };
-    rec.onend = () => {
-      isRecognizing = false;
-      recordBtn.classList.remove("recording");
-    };
-
-    rec.start();
-    isRecognizing = true;
-    recordBtn.classList.add("recording");
-  }
-
-  function stopBrowserRecognition() {
-    if (rec) {
-      rec.stop();
-      rec = null;
     }
-    isRecognizing = false;
-    recordBtn.classList.remove("recording");
+
+    // Show interim
+    const display = fullOriginalTranscript + (interim ? "\n" + interim : "");
+    originalEl.textContent = display;
+    originalEl.scrollTop = originalEl.scrollHeight;
+
+    // On final chunk: append and translate
+    finalText = finalText.trim();
+    if (finalText) {
+      appendOriginal(finalText);
+      const translated = await translateText(finalText);
+      if (translated) appendTranslated(translated);
+    }
+  };
+
+  try {
+    recognition.start();
+  } catch (e) {
+    console.warn("Recognition start error:", e);
   }
+}
 
-  // Server "hold-to-record" flow
-  let mediaStream = null;
-  let mediaRecorder = null;
-  let chunks = [];
+function stopMic() {
+  if (recognition && isMicActive) {
+    recognition.stop();
+  }
+}
 
-  async function startServerRecord() {
-    try {
-      mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaRecorder = new MediaRecorder(mediaStream, { mimeType: "audio/webm" });
-      chunks = [];
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) chunks.push(e.data);
-      };
-      mediaRecorder.onstop = async () => {
-        try {
-          const blob = new Blob(chunks, { type: "audio/webm" });
-          const fd = new FormData();
-          fd.append("audio", blob, "audio.webm");
-          fd.append("sourceLang", sourceLangEl.value);
-          const res = await fetch("/api/transcribe", { method: "POST", body: fd });
-          if (!res.ok) throw new Error("Transcription failed");
-          const data = await res.json();
-          const newText = (data.text || "").trim();
-          if (newText) {
-            const combined = (original + (original ? " " : "") + newText).trim();
-            updateOriginal(combined);
-            await translateNow(combined, sourceLangEl.value, targetLangEl.value);
-          }
-        } catch (err) {
-          console.error(err);
-        } finally {
-          if (mediaStream) {
-            mediaStream.getTracks().forEach((t) => t.stop());
-            mediaStream = null;
-          }
-        }
-      };
-      mediaRecorder.start();
-      isRecognizing = true;
+// Fallback: Record via MediaRecorder and send to /stt
+async function startRecording() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    recordedChunks = [];
+    mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) recordedChunks.push(e.data);
+    };
+    mediaRecorder.onstart = () => {
+      setStatus("Recording (fallback)... Press again to stop.");
       recordBtn.classList.add("recording");
-    } catch (err) {
-      console.error("Mic error", err);
+    };
+    mediaRecorder.onstop = async () => {
+      recordBtn.classList.remove("recording");
+      setStatus("Processing audio...");
+      const blob = new Blob(recordedChunks, { type: "audio/webm" });
+      await sendForTranscription(blob);
+      setStatus("Ready.");
+      stream.getTracks().forEach((t) => t.stop());
+      mediaRecorder = null;
+      recordBtn.textContent = "Record (Fallback)";
+    };
+    mediaRecorder.start();
+    recordBtn.textContent = "Stop Recording";
+  } catch (e) {
+    console.error("Recording error:", e);
+    setStatus(`Recording error: ${e.message}`, "error");
+  }
+}
+
+function stopRecording() {
+  if (mediaRecorder && mediaRecorder.state !== "inactive") {
+    mediaRecorder.stop();
+  }
+}
+
+async function sendForTranscription(blob) {
+  try {
+    appendOriginal("(uploading audio...)");
+    const form = new FormData();
+    const file = new File([blob], "speech.webm", { type: "audio/webm" });
+    form.append("file", file);
+    const res = await fetch("/stt", { method: "POST", body: form });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${res.status}`);
     }
-  }
-
-  function stopServerRecord() {
-    if (mediaRecorder && mediaRecorder.state !== "inactive") {
-      mediaRecorder.stop();
+    const data = await res.json();
+    const text = data.text?.trim();
+    if (text) {
+      appendOriginal(text);
+      const translated = await translateText(text);
+      if (translated) appendTranslated(translated);
     }
-    isRecognizing = false;
-    recordBtn.classList.remove("recording");
+  } catch (e) {
+    console.error("STT error:", e);
+    setStatus(`STT failed: ${e.message}`, "error");
+  }
+}
+
+// TTS: server or browser
+async function speakTranslated() {
+  const text = lastTranslatedText || fullTranslatedTranscript.trim();
+  if (!text) {
+    setStatus("Nothing to speak yet.", "warn");
+    return;
   }
 
-  // TTS
-  let cachedVoices = [];
-  function loadVoices() {
-    cachedVoices = window.speechSynthesis.getVoices();
-  }
-  loadVoices();
-  if (typeof window !== "undefined") {
-    window.speechSynthesis.onvoiceschanged = loadVoices;
-  }
-
-  function speak(text, lang) {
-    if (!text) return;
+  if (useBrowserTTSCb.checked && "speechSynthesis" in window) {
     const utter = new SpeechSynthesisUtterance(text);
-    utter.lang = lang;
-    const match = cachedVoices.find((v) => (v.lang || "").toLowerCase() === lang.toLowerCase());
-    if (match) utter.voice = match;
+    utter.lang = outputLang.value || "en-US";
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utter);
+    setStatus("Speaking (browser)...");
+    return;
   }
 
-  // UI events
-  resetBtn.addEventListener("click", () => {
-    updateOriginal("");
-    updateTranslated("");
-    updateCorrected("");
-  });
-
-  useBrowserASREl.addEventListener("change", (e) => {
-    useBrowserASR = !!e.target.checked && canBrowserASR;
-    useBrowserASREl.checked = useBrowserASR;
-    asrLabel.textContent = "Use browser speech recognition" + (canBrowserASR ? "" : " (unavailable in this browser)");
-  });
-
-  speakBtn.addEventListener("click", () => {
-    speak(translated, targetLangEl.value);
-  });
-
-  recordBtn.addEventListener("click", () => {
-    // Click toggles only for browser ASR (continuous)
-    if (useBrowserASR) {
-      if (isRecognizing) stopBrowserRecognition();
-      else startBrowserRecognition();
+  // Server TTS
+  try {
+    const body = {
+      text,
+      voice: voiceSelect.value || "alloy",
+      format: formatSelect.value || "mp3",
+    };
+    const res = await fetch("/tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${res.status}`);
     }
-  });
-
-  // Hold-to-record for server mode
-  function attachHoldEvents(el) {
-    el.addEventListener("mousedown", () => { if (!useBrowserASR) startServerRecord(); });
-    el.addEventListener("mouseup", () => { if (!useBrowserASR) stopServerRecord(); });
-    el.addEventListener("mouseleave", () => { if (!useBrowserASR && isRecognizing) stopServerRecord(); });
-    el.addEventListener("touchstart", () => { if (!useBrowserASR) startServerRecord(); }, { passive: true });
-    el.addEventListener("touchend", () => { if (!useBrowserASR) stopServerRecord(); });
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    audioPlayer.hidden = false;
+    audioPlayer.src = url;
+    audioPlayer.play();
+    setStatus("Speaking (server)...");
+  } catch (e) {
+    console.error("TTS error:", e);
+    setStatus(`TTS failed: ${e.message}`, "error");
   }
-  attachHoldEvents(recordBtn);
-})();
+}
+
+// Event handlers
+micBtn.addEventListener("click", () => {
+  if (!isMicActive) startMic();
+  else stopMic();
+});
+
+recordBtn.addEventListener("click", () => {
+  if (!mediaRecorder || mediaRecorder.state === "inactive") {
+    startRecording();
+  } else {
+    stopRecording();
+  }
+});
+
+clearBtn.addEventListener("click", () => {
+  clearTranscripts();
+  setStatus("Cleared.");
+});
+
+speakBtn.addEventListener("click", speakTranslated);
+
+copyOriginalBtn.addEventListener("click", async () => {
+  await navigator.clipboard.writeText(fullOriginalTranscript || "");
+  setStatus("Original transcript copied.");
+});
+copyTranslatedBtn.addEventListener("click", async () => {
+  await navigator.clipboard.writeText(fullTranslatedTranscript || "");
+  setStatus("Translated transcript copied.");
+});
+
+// Change recognition language when inputLang changes (if running)
+inputLang.addEventListener("change", () => {
+  if (isMicActive) {
+    stopMic();
+    setTimeout(startMic, 300);
+  }
+});
