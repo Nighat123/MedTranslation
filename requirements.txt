@@ -1,12 +1,4 @@
-Flask
-Flask-Cors
-gunicorn
-torch
-transformers
-sentencepiece    # required by many MarianMT / T5 models
-protobuf          # needed by transformers
-tokenizers        # Hugging Face tokenizers
-numpy             # PyTorch uses numpy
-logging         # not required if using built-in logging
-tqdm            # progress bars when downloading models
-
+fastapi==0.112.0
+uvicorn[standard]==0.30.1
+python-multipart==0.0.9
+openai>=1.40.0

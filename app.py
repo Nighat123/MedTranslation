@@ -1,168 +1,168 @@
-from flask import Flask, request, jsonify, send_from_directory
-from flask_cors import CORS
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
-import torch
-import logging
+import json
+import os
+from io import BytesIO
+from typing import Optional
 
-app = Flask(__name__)
-CORS(app)
+from fastapi import FastAPI, UploadFile, File, Form
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from starlette.requests import Request
+from starlette.responses import Response
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("medical-translator")
+from openai import OpenAI
 
-# --------- Optional grammar/medical enhancement model (T5-based) ----------
-GEC_MODEL_ID = "vennify/t5-base-grammar-correction"
-try:
-    gec_tokenizer = AutoTokenizer.from_pretrained(GEC_MODEL_ID)
-    gec_model = AutoModelForSeq2SeqLM.from_pretrained(GEC_MODEL_ID)
-    USE_GEC = True
-    logger.info("Loaded grammar correction model.")
-except Exception as e:
-    logger.warning(f"Grammar model unavailable, falling back to pass-through. Reason: {e}")
-    gec_tokenizer = None
-    gec_model = None
-    USE_GEC = False
+# ------------- Config and setup -------------
 
-# --------- Translation model cache ----------
-translation_cache: dict[str, tuple[AutoTokenizer, AutoModelForSeq2SeqLM]] = {}
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+if not OPENAI_API_KEY:
+    print("WARNING: OPENAI_API_KEY is not set. Set it in your environment or a .env file.")
 
-SUPPORTED_LANGUAGES = {
-    "ar": "Arabic", "de": "German", "es": "Spanish",
-    "fr": "French", "hi": "Hindi", "id": "Indonesian", "it": "Italian", "ja": "Japanese", "ko": "Korean",
-    "nl": "Dutch", "pl": "Polish", "ru": "Russian", "sv": "Swedish",
-    "th": "Thai", "tr": "Turkish", "uk": "Ukrainian", "ur": "Urdu", "vi": "Vietnamese",
-    "zh": "Chinese", "en": "English"
-}
+client = OpenAI(api_key=OPENAI_API_KEY)
 
-BCP47_BY_CODE = {
-    "ar": "ar-SA","de": "de-DE","es": "es-ES",
-    "fr": "fr-FR", "hi": "hi-IN", "id": "id-ID", "it": "it-IT",
-    "ja": "ja-JP", "ko": "ko-KR", "nl": "nl-NL", "pl": "pl-PL",
-    "ru": "ru-RU", "sv": "sv-SE", "th": "th-TH",
-    "tr": "tr-TR", "uk": "uk-UA", "ur": "ur-PK", "vi": "vi-VN", "zh": "zh-CN", "en": "en-US"
-}
+app = FastAPI(title="Healthcare Translation AI (Python)")
 
+# Serve static assets
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
-@app.route("/")
-def index():
-    return send_from_directory(".", "home.html")
+# CORS (same-origin by default; keep permissive if you need to host front-end separately)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # For demo; restrict in production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+MEDICAL_SYSTEM_PROMPT = """
+You are a medical-domain translation assistant.
+- Correct misrecognized medical terms in the source transcript.
+- Preserve clinical meaning, dosages, measurements, lab values, vital signs, names, and dates.
+- Expand unclear acronyms only if unambiguous; otherwise keep original and add expansion in parentheses.
+- Keep formatting simple. No markdown.
+- Return strict JSON with fields: corrected_source, translation.
+""".strip()
 
 
-@app.route("/languages", methods=["GET"])
-def languages():
-    return jsonify({
-        "languages": [
-            {"code": code, "name": name, "bcp47": BCP47_BY_CODE.get(code, code)}
-            for code, name in SUPPORTED_LANGUAGES.items()
-        ]
-    })
+def no_store_headers() -> dict:
+    return {
+        "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0, s-maxage=0"
+    }
 
 
-def load_translation_model(source_lang: str, target_lang: str):
-    """Load/cached MarianMT model for source->target."""
-    if source_lang == target_lang:
-        raise ValueError("Source and target languages must be different.")
+# ------------- Routes -------------
 
-    model_id = f"Helsinki-NLP/opus-mt-{source_lang}-{target_lang}"
-    if model_id in translation_cache:
-        return translation_cache[model_id]
+@app.get("/")
+def root():
+    # Serve the static SPA
+    return FileResponse("static/index.html", headers=no_store_headers())
+
+
+@app.post("/api/translate")
+async def translate(payload: dict):
+    """
+    Body: { text: string, sourceLang: string (BCP-47), targetLang: string (BCP-47) }
+    """
+    headers = no_store_headers()
+    text = payload.get("text", "")
+    source_lang = payload.get("sourceLang", "auto")
+    target_lang = payload.get("targetLang")
+
+    if not text or not target_lang:
+        return JSONResponse({"error": "Missing text or targetLang"}, status_code=400, headers=headers)
 
     try:
-        tok = AutoTokenizer.from_pretrained(model_id)
-        mdl = AutoModelForSeq2SeqLM.from_pretrained(model_id)
-        translation_cache[model_id] = (tok, mdl)
-        logger.info(f"Loaded translation model: {model_id}")
-        return tok, mdl
+        # Use the Responses API with JSON schema to ensure structured output
+        resp = client.responses.create(
+            model="gpt-4o-mini",
+            temperature=0.2,
+            reasoning={"effort": "medium"},
+            input=[
+                {"role": "system", "content": MEDICAL_SYSTEM_PROMPT},
+                {"role": "user", "content": [
+                    {
+                        "type": "text",
+                        "text": f"Source language (BCP-47): {source_lang}\nTarget language (BCP-47): {target_lang}\n\nText:\n{text}"
+                    }
+                ]}
+            ],
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "MedicalTranslation",
+                    "schema": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "corrected_source": {"type": "string"},
+                            "translation": {"type": "string"}
+                        },
+                        "required": ["corrected_source", "translation"]
+                    }
+                }
+            }
+        )
+
+        parsed: Optional[dict] = None
+
+        # Prefer output_text helper if present
+        out_text = getattr(resp, "output_text", None)
+        if out_text:
+            parsed = json.loads(out_text)
+        else:
+            # Fallback: try to find output_text-like content in 'output'
+            output = getattr(resp, "output", None)
+            if isinstance(output, list):
+                for item in output:
+                    if item.get("type") == "output_text" and "text" in item:
+                        parsed = json.loads(item["text"])
+                        break
+
+        if not parsed:
+            raise ValueError("Failed to parse translation output")
+
+        return JSONResponse(parsed, status_code=200, headers=headers)
     except Exception as e:
-        logger.warning(f"Direct model {model_id} unavailable: {e}")
-        return None  # fallback via English will be handled
+        print("Translate error:", str(e))
+        return JSONResponse({"error": "Translation failed"}, status_code=500, headers=headers)
 
 
-def run_translation(text: str, source_lang: str, target_lang: str) -> str:
-    """Try direct translation; if unavailable, fallback via English."""
-
-    # 1) Direct translation
-    model = load_translation_model(source_lang, target_lang)
-    if model:
-        tok, mdl = model
-        inputs = tok([text], return_tensors="pt", padding=True, truncation=True)
-        with torch.no_grad():
-            generated = mdl.generate(**inputs, max_new_tokens=128, num_beams=4, early_stopping=True)
-        return tok.decode(generated[0], skip_special_tokens=True).strip()
-
-    # 2) Fallback via English
-    if source_lang != "en":
-        model_to_en = load_translation_model(source_lang, "en")
-        if not model_to_en:
-            raise RuntimeError(f"No model found for {source_lang} → English")
-        tok, mdl = model_to_en
-        inputs = tok([text], return_tensors="pt", padding=True, truncation=True)
-        with torch.no_grad():
-            generated = mdl.generate(**inputs, max_new_tokens=128, num_beams=4, early_stopping=True)
-        text_in_english = tok.decode(generated[0], skip_special_tokens=True).strip()
-    else:
-        text_in_english = text
-
-    if target_lang == "en":
-        return text_in_english
-
-    model_from_en = load_translation_model("en", target_lang)
-    if not model_from_en:
-        raise RuntimeError(f"No model found for English → {target_lang}")
-    tok, mdl = model_from_en
-    inputs = tok([text_in_english], return_tensors="pt", padding=True, truncation=True)
-    with torch.no_grad():
-        generated = mdl.generate(**inputs, max_new_tokens=128, num_beams=4, early_stopping=True)
-    return tok.decode(generated[0], skip_special_tokens=True).strip()
-
-
-def enhance_text(text: str, source_lang: str) -> str:
-    """Enhance text only if source language is English."""
-    if not text:
-        return text
-    if source_lang != "en" or not USE_GEC:
-        return text.strip()
+@app.post("/api/transcribe")
+async def transcribe(audio: UploadFile = File(...), sourceLang: str = Form("en-US")):
+    """
+    Multipart form-data:
+      - audio: recorded audio (e.g., audio/webm)
+      - sourceLang: optional hint (BCP-47)
+    """
+    headers = no_store_headers()
     try:
-        inp = f"fix: {text.strip()}"
-        inputs = gec_tokenizer([inp], return_tensors="pt", padding=True)
-        with torch.no_grad():
-            outputs = gec_model.generate(**inputs, max_new_tokens=128, num_beams=4, early_stopping=True)
-        corrected = gec_tokenizer.decode(outputs[0], skip_special_tokens=True)
-        return corrected.strip()
+        # Read bytes for safety across SDKs
+        blob = await audio.read()
+        file_like = BytesIO(blob)
+
+        text: Optional[str] = None
+
+        # Try gpt-4o-transcribe first
+        try:
+            res = client.audio.transcriptions.create(
+                model="gpt-4o-transcribe",
+                file=file_like
+            )
+            # Some SDKs return an object with 'text' attribute
+            text = getattr(res, "text", None)
+        except Exception:
+            # Reset buffer for second attempt
+            file_like.seek(0)
+            res2 = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=file_like
+            )
+            text = getattr(res2, "text", None)
+
+        if not text:
+            raise ValueError("No transcription text received")
+
+        return JSONResponse({"text": text}, status_code=200, headers=headers)
     except Exception as e:
-        logger.warning(f"GEC failed, fallback to original. Reason: {e}")
-        return text.strip()
-
-
-@app.route("/process_text", methods=["POST"])
-def process_text():
-    try:
-        data = request.get_json(force=True) or {}
-        raw_text = (data.get("text") or "").strip()
-        source_lang = (data.get("source_lang") or "en").lower()
-        target_lang = (data.get("target_lang") or "es").lower()
-
-        if not raw_text:
-            return jsonify({"error": "No text provided"}), 400
-
-        enhanced = enhance_text(raw_text, source_lang)
-        translated = run_translation(enhanced, source_lang, target_lang)
-
-        return jsonify({
-            "enhanced_text": enhanced,
-            "translated_text": translated,
-            "tts_lang": BCP47_BY_CODE.get(target_lang, target_lang),
-            "target_lang": target_lang
-        })
-
-    except ValueError as ve:
-        return jsonify({"error": str(ve)}), 400
-    except RuntimeError as re:
-        return jsonify({"error": str(re)}), 400
-    except Exception as e:
-        logger.exception("Translation failed.Please try again")
-        return jsonify({"error": str(e)}), 500
-
-
-if __name__ == "__main__":
-    app.run(debug=True)
+        print("Transcribe error:", str(e))
+        return JSONResponse({"error": "Transcription failed"}, status_code=500, headers=headers)
