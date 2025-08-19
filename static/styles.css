@@ -61,13 +61,13 @@ body {
   margin-bottom: 1rem;
 }
 
-/* Hero */
+
 .hero { display: grid; gap: 1rem; }
 .hero-text h2 { margin: 0 0 .3rem; font-size: clamp(1.25rem, 1rem + 1.2vw, 1.8rem); }
 .hero-text p { margin: 0; color: var(--muted); }
 .hero-cta { display: flex; gap: .6rem; flex-wrap: wrap; }
 
-/* Controls */
+
 .controls .row { display: flex; gap: .75rem; align-items: flex-end; margin-bottom: .75rem; flex-wrap: wrap; }
 .controls .row.between { align-items: center; justify-content: space-between; }
 .field { display: grid; gap: .35rem; min-width: 180px; }
@@ -83,7 +83,7 @@ select {
 }
 select:focus { border-color: rgba(59,130,246,.5); box-shadow: 0 0 0 3px rgba(59,130,246,.2); }
 
-/* Buttons */
+
 button {
   padding: .65rem .95rem;
   border: 1px solid var(--border);
@@ -132,13 +132,13 @@ button.recording {
 
 .actions { display: flex; gap: .5rem; align-items: center; }
 
-/* Status + audio */
+
 .status { font-size: .92rem; color: var(--muted); padding-top: .25rem; min-height: 1.2rem; }
 .status.error { color: var(--danger); }
 .status.warn { color: var(--warn); }
 .audio { width: 100%; margin-top: .6rem; }
 
-/* Columns */
+
 .columns { display: grid; grid-template-columns: 1fr; gap: 1rem; }
 @media (min-width: 860px) {
   .columns { grid-template-columns: 1fr 1fr; }
@@ -179,10 +179,10 @@ button.recording {
   overflow: auto;
 }
 
-/* Tips */
+
 .tips h4 { margin: 0 0 .4rem; }
 .tips ul { margin: .5rem 0 0; padding-left: 1.1rem; color: var(--muted); }
 .tips li { margin: .25rem 0; }
 
-/* Footer */
+
 .foot { text-align: center; padding: 1rem; color: var(--muted); }
