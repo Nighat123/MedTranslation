@@ -10,8 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-# Load environment variables from a local .env file (if present)
-# Requires: python-dotenv (pip install python-dotenv)
+
 try:
     from dotenv import load_dotenv
 
@@ -19,18 +18,18 @@ try:
 except Exception as e:
     logging.getLogger(__name__).warning("Could not load .env automatically: %s", e)
 
-# OpenAI SDK (pip install 'openai>=1.40.0')
+
 from openai import OpenAI, OpenAIError
 
-# --- Configuration ---
+
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL")  # optional, e.g., proxy or Azure-compatible gateway
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL") 
 LLM_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-STT_MODEL = os.getenv("STT_MODEL", "gpt-4o-transcribe")  # or "whisper-1"
+STT_MODEL = os.getenv("STT_MODEL", "gpt-4o-transcribe") 
 TTS_MODEL = os.getenv("TTS_MODEL", "gpt-4o-mini-tts")
 DEFAULT_TTS_VOICE = os.getenv("TTS_VOICE", "alloy")
 
-# Lazily create the OpenAI client when needed, so app can start without a key
+
 _client: Optional[OpenAI] = None
 
 
@@ -49,7 +48,7 @@ def get_openai_client() -> OpenAI:
 
 app = FastAPI(title="Healthcare Translation Web App", version="1.0.0")
 
-# CORS: For prototypes you may allow '*', tighten in production.
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.getenv("CORS_ALLOW_ORIGINS", "*").split(","),
@@ -58,7 +57,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- Static files ---
+
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
@@ -79,7 +78,7 @@ def root():
     )
 
 
-# --- Schemas ---
+
 class TranslateRequest(BaseModel):
     text: str = Field(..., description="Source text to translate")
     source_lang: Optional[str] = Field(None, description="Source language (auto if omitted)")
@@ -97,7 +96,7 @@ class TTSRequest(BaseModel):
     format: Optional[str] = Field("mp3", description="Audio format: mp3|wav|ogg")
 
 
-# --- Routes ---
+
 @app.get("/health")
 def health():
     return {
@@ -189,7 +188,7 @@ async def tts(req: TTSRequest):
     try:
         client = get_openai_client()
 
-        # Prefer streaming to avoid buffering large audio in memory
+    
         stream_ctx = client.audio.speech.with_streaming_response.create(
             model=TTS_MODEL,
             voice=voice,
@@ -224,5 +223,5 @@ if __name__ == "__main__":
     port = int(os.getenv("PORT", "8000"))
     reload = os.getenv("RELOAD", "1").lower() in ("1", "true", "yes")
 
-    # Run with: python -m app
+  
     uvicorn.run("app:app", host=host, port=port, reload=reload)
